@@ -1,8 +1,10 @@
 # Investigation of Bridge Performance Under Various Earthquakes with Machine Learning
 
 **Course:** UE24CS352A — Machine Learning (Mini-Project), PES University
-**Team:** `[Member 1 name, SRN]`, `[Member 2 name, SRN]`  ← *fill in*
-**Repository:** `[GitHub URL]`  ← *fill in*
+**Team** 
+**Member 1: **`Nihar S Oak | PES1UG2SCS299`
+**Member 2: **`Nikita Mankani | PES1UG2SCS300`
+**Repository:** `https://github.com/nikitamankani/Predicting-Bridge-Performance-under-Earthquakes-with-Supervised-Learning '
 
 Predict whether a bridge is damaged in an earthquake (binary), and its damage level (3 classes),
 from bridge attributes (material, age, bridge type) and earthquake attributes (magnitude,
@@ -71,10 +73,6 @@ bridge-eq-ml/
     └── presentation.pptx
 ```
 
-The earlier notebooks (`bridge_damage_classification.ipynb`, `reference_with_outputs.ipynb`)
-were removed: they duplicated the same workflow. Everything they did (EDA plots, the 70/30
-split, Dummy/RF/XGBoost/SVM tuning, ROC/PR curves, confusion matrices, feature importance,
-multi-class model) is in `run_experiments.py`, which is now the single source of truth.
 
 ---
 
