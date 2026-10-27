@@ -1,0 +1,279 @@
+# Investigation of Bridge Performance Under Various Earthquakes with Machine Learning
+
+**Course:** UE24CS352A Machine Learning (Mini-Project), PES University
+
+**Team:**
+- Nihar S Oak (PES1UG24CS299)
+- Nikita Mankani (PES1UG24CS300)
+
+**Repository:** https://github.com/nikitamankani/Predicting-Bridge-Performance-under-Earthquakes-with-Supervised-Learning
+
+Predict whether a bridge is damaged in an earthquake (binary), and its damage level (3 classes),
+from bridge attributes (material, age, bridge type) and earthquake attributes (magnitude,
+distance to epicenter). The dataset and problem come from the Stanford CS229 project by
+Jiang & Zhang (2018) [1]; this repository is our own re-implementation and extension.
+
+> **Scope.** The models learn statistical patterns in 249 historical records. They are not a
+> structural analysis and must not be used to judge the safety of a real bridge.
+
+---
+
+## 1. How to run
+
+### Locally
+
+Needs Python 3.10 or newer (we tested with Python 3.13, scikit-learn 1.9.1, xgboost 3.4.1,
+imbalanced-learn 0.14.2, pandas 3.0.5).
+
+```bash
+git clone https://github.com/nikitamankani/Predicting-Bridge-Performance-under-Earthquakes-with-Supervised-Learning.git
+cd Predicting-Bridge-Performance-under-Earthquakes-with-Supervised-Learning
+pip install -r requirements.txt
+
+python -m src.data_loader              # only loads + cleans the data and prints the counts
+python run_experiments.py              # full run, 5 CV repeats (around 10 min)
+python run_experiments.py --repeats 1  # quick run (around 2-3 min)
+```
+
+All outputs (tables, plots, saved model) are written to `results/`, which is created by the
+script and not stored in the repository. The full 5-repeat run gives the numbers reported below.
+With `--repeats 1` the numbers come from a single repeat and change a little; the chosen final
+model can also switch between SVM and logistic regression because the two are very close.
+
+### On Google Colab
+
+1. Download this repository as a ZIP (Code -> Download ZIP).
+2. Open `colab_demo.ipynb` in Colab (File -> Upload notebook).
+3. Run the cells in order. The first cell asks for the ZIP; the notebook then runs
+   `run_experiments.py` and shows the tables, confusion matrices and plots inline.
+
+### Using the saved model
+
+The saved file contains the whole pipeline (preprocessing + classifier):
+
+```python
+import joblib, pandas as pd
+model = joblib.load("results/models/final_model.joblib")
+X = pd.DataFrame([{"material": "concrete", "age": 30, "bridge_type": "beam_girder",
+                   "magnitude": 6.7, "distance_mi": 10.0}])
+print(model.predict(X))   # 1 = damaged, 0 = not damaged
+```
+
+---
+
+## 2. Folder structure
+
+```
+Predicting-Bridge-Performance-under-Earthquakes-with-Supervised-Learning/
+├── README.md
+├── requirements.txt
+├── run_experiments.py          <- runs everything: EDA, all evaluations, final model
+├── colab_demo.ipynb            <- runs the project on Google Colab and shows the outputs
+├── data/
+│   └── bridge_earthquake_data.csv   <- original dataset, unmodified
+├── src/
+│   ├── data_loader.py          <- loading, cleaning, bridge grouping
+│   ├── models.py               <- model pipelines + hyper-parameter grids
+│   └── evaluate.py             <- metrics and plots
+├── results/                    <- created by run_experiments.py (not in the repo)
+│   ├── results_summary.md
+│   ├── figures/                <- EDA, confusion matrices, ROC/PR, permutation importance
+│   ├── metrics/                <- CSV files for every evaluation
+│   └── models/final_model.joblib
+└── deliverables/
+    ├── writeup.pdf             <- 2-page report
+    └── presentation.pptx
+```
+
+
+---
+
+## 3. Dataset
+
+**File:** `data/bridge_earthquake_data.csv` - byte-identical (MD5 `0c226f979e7c1a1c0352fd497b5e84c7`)
+to `Final Project Code/Data/ds2.csv` in the authors' repository [6], renamed. That repository
+has no licence file.
+Positive (damaged) records come from documented bridge failures (U.S. and Japanese earthquakes:
+Loma Prieta 1989, Northridge 1994, San Fernando 1971, Alaska 1964, Kobe 1995, Miyagi 1978,
+Tohoku 2011); negative records are other earthquakes near the same bridges, assumed undamaged
+because no damage was recorded [1].
+
+| Column | Meaning | Use |
+|---|---|---|
+| x1 Material Type | I = steel, II = concrete | feature (categorical) |
+| x2 Age (yr) | age of the bridge at the time of the earthquake | feature |
+| x3 Bridge Type | I = beam/girder, II = truss, III = cable/suspension, IV = arch | feature (categorical) |
+| x4 Earthquake Magnitude | | feature |
+| x5 Distance to epicenter (miles) | | feature |
+| y1 Damaged or not? | 1 = damaged, 0 = not damaged | **binary target** |
+| y2 Damage Level | Level I: No damage · Level II: Moderate/severe damage · Level III: Partial/overall collapse | **multi-class target** (mapped I→0, II→1, III→2) |
+| Name of the bridge, Earthquake, Note, Location | identifiers / free text | grouping and inspection only |
+
+The codes above are taken from the codebook embedded in the CSV itself.
+
+**Verified counts:** 249 observations; 228 undamaged, 21 damaged (≈ 11:1); damage levels
+I / II / III = 228 / 11 / 10. `y1 = 1` exactly when `y2` is II or III (checked in code).
+
+**Bridges.** The file contains 26 distinct bridge-name strings but only **20 physical bridges**:
+the damaging record of a bridge carries its construction year
+(`"Interstate 10 (over La Cienega Boulevard), 1957"`) while its other records do not
+(`"Interstate 10 (over La Cienega Boulevard)"`). Removing a trailing `, YYYY` gives the
+`bridge_id` used for grouped evaluation. Each bridge has 5–18 records and exactly one damaged
+record (Yuriage Bridge has two).
+
+**Cleaning (`src/data_loader.py`, reproducible, nothing imputed):**
+1. Drop the 17 `Unnamed` columns (empty, except one cell holding the codebook text).
+2. Drop the 750 completely empty padding rows (999 → 249 rows).
+3. Strip stray whitespace from text fields.
+4. Assert there are no missing values in features or targets (there are none).
+5. Decode material / bridge-type codes to names; map damage level I/II/III → 0/1/2.
+6. Check `damaged` is consistent with `damage_level`; add `bridge_id`.
+
+Known data quirks (kept, not "fixed"): some ages look inconsistent with the year in the
+bridge name (e.g. Gavin Canyon, built 1947 per the name, has age 15 in 1994); the
+Palmdale-interchange and Antelope-Valley-Freeway records may describe structures at the same
+I-5/SR-14 interchange but are kept as separate bridges as named.
+
+---
+
+## 4. Method
+
+**Features:** material, age, bridge_type, magnitude, distance_mi. Numeric → `StandardScaler`,
+categorical → `OneHotEncoder`.
+
+**Models** (all in `src/models.py`):
+
+| Model | Imbalance handling | Why it is included |
+|---|---|---|
+| Dummy (majority class) | – | floor: what accuracy means at 11:1 |
+| Logistic Regression, magnitude only | `class_weight="balanced"` | does anything beat one feature? |
+| Logistic Regression, all features | `class_weight="balanced"` | simple interpretable linear model |
+| Random Forest | SMOTE (k=3) | bagged trees |
+| XGBoost | `scale_pos_weight` = #neg/#pos of the training fold | boosted trees |
+| SVM, RBF kernel | SMOTE (k=3) + `class_weight="balanced"` | kernel method |
+
+Each model is one `Pipeline` (preprocessing → [SMOTE] → classifier), so scaling, encoding and
+SMOTE are fitted on training rows only - including inside every CV fold. No feature selection
+is done. Hyper-parameters are tuned with `GridSearchCV` (scoring = F1) on training data only.
+
+**Evaluation protocols**
+
+| | Split | Tuning | Purpose |
+|---|---|---|---|
+| **A** | one stratified random 70/30 split of rows (seed 42) | 5-fold stratified CV on the 70% | reproduces the original project; **optimistic** |
+| **B** | stratified 5-fold CV on rows, 5 repeats | nested 4-fold stratified CV | row-level reference |
+| **C** | **StratifiedGroupKFold** by `bridge_id`, 5 folds, 5 repeats | nested 4-fold grouped CV | **primary result** |
+
+In protocol A, 19 of the 19 bridges in the test set also have rows in the training set. In C,
+no bridge ever appears in both train and test. B and C use identical models and grids, so their
+difference isolates the effect of bridge overlap. For B and C, out-of-fold predictions for all
+249 rows are pooled per repeat, metrics are computed on the pooled predictions, and we report
+mean ± std over the 5 repeats (seeds 42–46).
+
+*Is grouped CV reliable here?* 20 bridges / 21 damaged rows means each grouped test fold holds
+4 bridges and 4–5 damaged rows. Single-fold metrics would be very noisy, which is why we pool
+out-of-fold predictions over all 249 rows and repeat with 5 shuffles. Even so, one damaged
+record ≈ 4.8 percentage points of recall, so differences of one or two predictions between
+models are not meaningful.
+
+---
+
+## 5. Results (from `results/results_summary.md`)
+
+### 5.1 Primary - Protocol C, bridge-grouped CV (mean ± std over 5 repeats)
+
+| Model | Accuracy | Precision | Recall | F1 | ROC-AUC | PR-AUC |
+|---|---|---|---|---|---|---|
+| Dummy (majority) | 0.916 | 0.000 | 0.000 | 0.000 | 0.500 | 0.084 |
+| LogReg (magnitude only) | 0.908 | 0.477 | 1.000 | 0.646 | 0.969 | 0.688 ± 0.013 |
+| LogReg (all features) | 0.970 | 0.777 | 0.914 | 0.840 ± 0.036 | 0.993 | 0.930 ± 0.019 |
+| Random Forest + SMOTE | 0.966 | 0.726 | 0.971 | 0.830 ± 0.014 | 0.987 | 0.832 ± 0.067 |
+| XGBoost (weighted) | 0.966 | 0.719 | 1.000 | 0.835 ± 0.041 | 0.993 | 0.919 ± 0.016 |
+| **SVM (RBF) + SMOTE** | **0.981** | **0.847** | 0.943 | **0.892 ± 0.021** | **0.996** | **0.935 ± 0.017** |
+
+Mean confusion counts per repeat (out of 21 damaged / 228 undamaged): SVM TP 19.8, FP 3.6;
+LogReg-all TP 19.2, FP 5.6; RF TP 20.4, FP 7.8; XGBoost TP 21.0, FP 8.4; magnitude-only TP 21, FP 23.
+
+### 5.2 Effect of the evaluation protocol (F1 / PR-AUC)
+
+| Model | A: single 70/30 split | B: row-level CV | C: grouped CV |
+|---|---|---|---|
+| LogReg (all features) | 0.615 / 0.757 | 0.868 / 0.925 | 0.840 / 0.930 |
+| Random Forest + SMOTE | 0.923 / 1.000 | 0.832 / 0.836 | 0.830 / 0.832 |
+| XGBoost (weighted) | 0.923 / 0.873 | 0.816 / 0.845 | 0.835 / 0.919 |
+| SVM (RBF) + SMOTE | 0.667 / 0.863 | 0.912 / 0.951 | 0.892 / 0.935 |
+
+### 5.3 Multi-class damage level (XGBoost + SMOTE)
+
+Protocol C, pooled over all 249 rows, mean over 5 repeats:
+
+| Class | Precision | Recall | F1 | Support |
+|---|---|---|---|---|
+| Level I: No damage | 0.998 | 0.970 | 0.984 | 228 |
+| Level II: Moderate/severe damage | 0.370 | 0.455 | 0.402 | 11 |
+| Level III: Partial/overall collapse | 0.302 | 0.420 | 0.349 | 10 |
+| Accuracy / macro F1 / weighted F1 | | | 0.925 / 0.578 / 0.933 | 249 |
+
+Protocol A (test set: 69 / 3 / 3 rows): accuracy 0.947, macro F1 0.631, weighted F1 0.949;
+Level II F1 0.50 and Level III F1 0.40 are each based on 3 test rows.
+
+### 5.4 Interpretation
+
+Permutation importance on held-out bridges (protocol C, repeat 1; drop in PR-AUC):
+magnitude ≈ 0.71–0.79 and distance ≈ 0.15–0.20 for every model; age, material and
+bridge_type are all within ±0.04 of zero, with standard deviations that cross zero.
+
+---
+
+## 6. Conclusions
+
+1. **Verification of earlier numbers.** Re-executing the original notebook reproduced its
+   reported results exactly (Dummy 0.920, RF 0.987, XGBoost 0.987, SVM 0.947 accuracy;
+   multi-class 0.9467 / 0.631 / 0.949). Those are protocol-A numbers on a test set with only
+   6 damaged rows: one prediction changes recall by 16.7 points. Even our refactor changed the
+   RF result (precision 1.000 / recall 0.833 → 0.857 / 1.000) only because the one-hot column
+   order changed - the single split is too small to rank models.
+2. **Bridge-grouped evaluation did not reduce performance materially** (B vs C differ by
+   ≤ 0.03 in F1, and PR-AUC moves in both directions). A likely reason: each bridge has exactly one
+   damaging event, and the label is driven by earthquake variables that vary within a bridge,
+   not by bridge identity. Grouped CV is still the correct protocol and is what we report.
+3. **Model ranking.** Under grouped CV the SVM has the best mean F1 and PR-AUC, but its lead
+   over a plain logistic regression is about 1 TP and 2 FP per run of 249 rows. We do not claim
+   the tree ensembles beat logistic regression: they do not under CV.
+4. **Magnitude explains most of the signal.** Magnitude alone gives recall 1.0 but precision
+   0.48 (23 false alarms per run); with all features the false alarms drop to about 4–8. We found no evidence that material,
+   bridge type or age help prediction in this dataset.
+5. **Multi-class is not reliable.** The model separates damaged from undamaged, but Level II
+   vs Level III is close to chance (F1 ≈ 0.35–0.40 on 11 and 10 records).
+6. **Comparison with Stanford [1, 6].** They report 94.8% test accuracy for QDA (age, magnitude,
+   distance). Their released code [6] trains on the first 199 rows of the file and tests on the
+   last 50 (the report says 70/30), up-samples the training positives by bootstrap at 5 ratios ×
+   100 repeats, and averages test accuracy; their saved QDA output averages to exactly 0.948.
+   That test set holds only 3 damaged rows, all Japanese bridges, and one bridge (Sendai-Ohashi)
+   is split across train and test. Split, features and metrics differ from ours, so the
+   accuracies are not directly comparable and we do not claim to outperform them.
+
+## 7. Limitations
+
+- Very small sample: 249 rows, 21 damaged, 20 bridges. Confidence intervals would be wide.
+- Selection bias: every bridge entered the dataset because it was damaged once; the undamaged
+  records are mostly smaller earthquakes. A model can score well largely by learning
+  "large, nearby earthquake → damage".
+- Negative labels are assumptions ("no damage recorded"), not inspections [1].
+- Earthquakes are shared across bridges (e.g. 5 bridges damaged in Northridge 1994); we group
+  by bridge, not by earthquake, so event-level information can still be shared across folds.
+- No ground-motion intensity (PGA/PGV), soil or structural detail is available.
+- Thresholds are fixed at 0.5; no threshold tuning was done.
+
+## 8. References
+
+1. Z. Jiang, X. Zhang. *Predicting Bridge Performance under Earthquakes with Supervised
+   Learning.* Stanford CS229 project report, Fall 2018. https://cs229.stanford.edu/proj2018/report/24.pdf
+2. N. V. Chawla, K. W. Bowyer, L. O. Hall, W. P. Kegelmeyer. SMOTE: Synthetic Minority
+   Over-sampling Technique. *JAIR* 16, 321–357, 2002.
+3. T. Chen, C. Guestrin. XGBoost: A Scalable Tree Boosting System. *KDD*, 2016.
+4. F. Pedregosa et al. Scikit-learn: Machine Learning in Python. *JMLR* 12, 2825–2830, 2011.
+5. G. C. Lee, S. B. Mohan, C. Huang, B. N. Fard. *A Study of U.S. Bridge Failures (1980–2012).*
+   MCEER Technical Report MCEER-13-0008, 2013.
+6. Z. Jiang, X. Zhang. CS229-Fall-2018-Final-Report (code and data). GitHub,
+   https://github.com/jzy95310/CS229-Fall-2018-Final-Report
