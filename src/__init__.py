@@ -1,1 +1,1 @@
-"""Bridge-earthquake ML project package."""
+# bridge earthquake ML project
